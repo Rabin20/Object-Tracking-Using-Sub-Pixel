@@ -18,7 +18,7 @@ You can download the project as a ZIP file or clone it using Git.
 
 Using Git:
 
-git clone https://github.com/your-username/Object-Tracking-Using-Sub-Pixel.git
+git clone [https://github.com/your-username/Object-Tracking-Using-Sub-Pixel.git](https://github.com/Rabin20/Object-Tracking-Using-Sub-Pixel.git)
 
 Then move into the project folder:
 
