@@ -21,7 +21,7 @@ def generate_tracking_frames():
     global manual_roi
     manual_roi = None
 
-    frames = load_image_sequence("D:/project/mouse-1/img")
+    frames = load_image_sequence("mouse-1/img")
 
     if len(frames) == 0:
         print("No frames loaded")
