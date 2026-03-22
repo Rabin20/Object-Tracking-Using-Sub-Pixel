@@ -1,7 +1,14 @@
 import cv2
 import numpy as np
+import time
 
 from data.load_frames import load_image_sequence
+
+manual_roi = None
+
+def set_manual_roi(bbox):
+    global manual_roi
+    manual_roi = bbox
 from tracker.pixel_tracker import PixelTracker
 from tracker.subpixel_refinement import refine_subpixel
 from tracker.drift_correction import DriftCorrector
@@ -10,7 +17,9 @@ from evaluation.plot_results import plot_displacement_curve
 from detector import YOLODetector
 
 
-def main():
+def generate_tracking_frames():
+    global manual_roi
+    manual_roi = None
 
     frames = load_image_sequence("D:/project/mouse-1/img")
 
@@ -28,9 +37,18 @@ def main():
 
     # Fallback to manual ROI if detection fails
     if bbox is None:
-        print("YOLO could not detect object. Please select ROI manually.")
-        bbox = cv2.selectROI("Select Target", first_frame, False)
-        cv2.destroyAllWindows()
+        print("YOLO could not detect object. Waiting for manual ROI from web UI.")
+        while manual_roi is None:
+            frame_copy = first_frame.copy()
+            cv2.putText(frame_copy, "Draw a box to start tracking", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+            ret, buffer = cv2.imencode('.jpg', frame_copy)
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.1)
+            
+        bbox = manual_roi
+        print("Manual ROI set via web UI:", bbox)
     else:
         print("YOLO detected object:", bbox)
 
@@ -40,12 +58,25 @@ def main():
 
     drift = DriftCorrector()
     displacements = []
+    
+    # Store the last known manual ROI to detect manual mid-stream corrections
+    last_roi = manual_roi
 
     for idx, frame in enumerate(frames):
+        # If the user draws a new box on the web UI, re-initialize the tracker
+        if manual_roi != last_roi and manual_roi is not None:
+            pixel_tracker = PixelTracker(manual_roi)
+            pixel_tracker.init(frame)
+            last_roi = manual_roi
 
         success, bbox = pixel_tracker.update(frame)
 
         if not success:
+            cv2.putText(frame, "Tracking Lost", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             continue
 
         x, y, w, h = map(int, bbox)
@@ -96,10 +127,10 @@ def main():
                     (0, 255, 0),
                     2)
 
-        cv2.imshow("Tracking", frame)
-
-        if cv2.waitKey(1) == 27:
-            break
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
     # Save displacement plot
     plot_displacement_curve(
@@ -107,8 +138,30 @@ def main():
         "src/output/plots/displacement.png"
     )
 
-    cv2.destroyAllWindows()
+    # Yield a final frame holding the "Tracking Finished" text
+    if len(frames) > 0:
+        final_frame = frames[-1].copy()
+        text = "Tracking Finished!"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 1.5
+        thickness = 3
+        text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
+        text_x = (final_frame.shape[1] - text_size[0]) // 2
+        text_y = (final_frame.shape[0] + text_size[1]) // 2
+        
+        cv2.putText(final_frame, text, (text_x, text_y), font, font_scale, (0, 255, 0), thickness)
+        ret, buffer = cv2.imencode('.jpg', final_frame)
+        frame_bytes = buffer.tobytes()
+        
+        # Yield the final frame a few times to ensure the browser displays it before the connection closes
+        for _ in range(5):
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.5)
 
+    return
 
 if __name__ == "__main__":
-    main()
+    # If run standalone, we can just iterate the generator but it won't display anything.
+    for _ in generate_tracking_frames():
+        pass

@@ -14,3 +14,9 @@ class PixelTracker:
         """Update tracker and return new bounding box."""
         success, new_bbox = self.tracker.update(frame)
         return success, new_bbox
+
+    def reinit(self, frame, new_bbox):
+        """Recreate and reinitialize tracker with a refined bounding box to prevent drift."""
+        self.tracker = cv2.TrackerCSRT_create()
+        self.tracker.init(frame, new_bbox)
+        self.bbox = new_bbox

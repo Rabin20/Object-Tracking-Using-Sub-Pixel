@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sub-Pixel Object Tracking</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            margin-top: 20px;
+            color: #4CAF50;
+        }
+        .video-container {
+            margin-top: 20px;
+            border: 2px solid #333;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.8);
+            width: 90vw;
+            max-width: 1200px;
+            text-align: center;
+            background-color: #000;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .info {
+            margin-top: 20px;
+            background-color: #1e1e1e;
+            padding: 15px 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            text-align: center;
+            max-width: 800px;
+            width: 90%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sub-Pixel Object Tracking</h1>
+    <div class="video-container">
+        <!-- The video stream from the Flask endpoint -->
+        <div style="position: relative; display: inline-block;">
+            <img id="videoStream" src="{{ url_for('video_feed') }}" alt="Video Stream" draggable="false" style="user-select: none;">
+            <div id="roiBox" style="position: absolute; border: 2px dashed #00FF00; display: none; pointer-events: none;"></div>
+        </div>
+    </div>
+    <div class="info">
+        <p>Live tracking stream based on YOLO initialization and sub-pixel refinement.</p>
+        <p id="statusMsg" style="color: #4CAF50;">If YOLO fails, draw a box over the video to manually start tracking.</p>
+    </div>
+
+    <script>
+        const img = document.getElementById('videoStream');
+        const roiBox = document.getElementById('roiBox');
+        const statusMsg = document.getElementById('statusMsg');
+        
+        let isDrawing = false;
+        let startX = 0, startY = 0;
+
+        img.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = img.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            roiBox.style.left = startX + 'px';
+            roiBox.style.top = startY + 'px';
+            roiBox.style.width = '0px';
+            roiBox.style.height = '0px';
+            roiBox.style.display = 'block';
+            roiBox.style.border = "2px dashed #00FF00";
+        });
+
+        img.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = img.getBoundingClientRect();
+            let currentX = e.clientX - rect.left;
+            let currentY = e.clientY - rect.top;
+
+            // clamp coordinates inside image
+            currentX = Math.max(0, Math.min(currentX, rect.width));
+            currentY = Math.max(0, Math.min(currentY, rect.height));
+
+            const x = Math.min(startX, currentX);
+            const y = Math.min(startY, currentY);
+            const w = Math.abs(currentX - startX);
+            const h = Math.abs(currentY - startY);
+
+            roiBox.style.left = x + 'px';
+            roiBox.style.top = y + 'px';
+            roiBox.style.width = w + 'px';
+            roiBox.style.height = h + 'px';
+        });
+
+        img.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+            
+            // Calculate original image coordinates
+            const scaleX = img.naturalWidth / img.width;
+            const scaleY = img.naturalHeight / img.height;
+            
+            const rect = img.getBoundingClientRect();
+            let endX = e.clientX - rect.left;
+            let endY = e.clientY - rect.top;
+            
+            // clamp
+            endX = Math.max(0, Math.min(endX, rect.width));
+            endY = Math.max(0, Math.min(endY, rect.height));
+
+            const x = Math.min(startX, endX) * scaleX;
+            const y = Math.min(startY, endY) * scaleY;
+            const w = Math.abs(endX - startX) * scaleX;
+            const h = Math.abs(endY - startY) * scaleY;
+
+            if (w > 10 && h > 10) { 
+                statusMsg.innerText = "Sending manual ROI to server...";
+                fetch('/set_roi', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) })
+                }).then(response => response.json())
+                  .then(data => {
+                      if (data.status === "success") {
+                          roiBox.style.border = "2px solid #00FF00";
+                          statusMsg.innerText = "ROI set successfully! Tracking starting...";
+                          setTimeout(() => { 
+                              roiBox.style.display = 'none'; 
+                              statusMsg.innerText = "Tracking object...";
+                          }, 1500);
+                      }
+                  }).catch(err => {
+                      statusMsg.innerText = "Error sending ROI: " + err;
+                      statusMsg.style.color = "red";
+                  });
+            } else {
+                roiBox.style.display = 'none';
+            }
+        });
+
+        // Handle case where mouse leaves the image while drawing
+        img.addEventListener('mouseleave', () => {
+            if (isDrawing) {
+                isDrawing = false;
+                roiBox.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
