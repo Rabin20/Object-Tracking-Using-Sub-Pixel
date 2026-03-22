@@ -17,7 +17,7 @@ COPY requirements.txt .
 # We also install gunicorn for serving the Flask app in production
 RUN apt-get update && apt-get install -y dos2unix && \
     iconv -f UTF-16LE -t UTF-8 requirements.txt > req_utf8.txt && \
-    pip install --no-cache-dir -r req_utf8.txt && \
+    pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r req_utf8.txt && \
     pip install --no-cache-dir gunicorn
 
 # Copy the rest of the application code
